@@ -1,8 +1,7 @@
 import os.path
 import sys
-import shlex
-import subprocess
 
+from utils import run
 
 def read_module_name(sip_file):
     '''
@@ -15,16 +14,34 @@ def read_module_name(sip_file):
 
     raise Exception('could not read %Module name from %r' % sip_file)
 
-class PythonExtension(object):
+class PythonModule(object):
     def __init__(self, sip_file):
 
         if not os.path.isfile(sip_file):
             raise Exception('file not found: %r' % sip_file)
+
         self.sip_file = sip_file
         self.gendir = opts.gendir
 
+        self.sources = []
+        self.libdirs = []
+        self.includes = []
+        self.libs = []
+
     def build(self):
-        spawn_sip(self.sipdir, self.gendir)
+        sbf = spawn_sip(self.sip_file, self.gendir)
+        self.name = sbf['target']
+        
+        # add generated sources to self.sources
+        self.sources.extend(os.path.join(self.gendir, s)
+                            for s in sbf['sources'])
+        
+        import bakefilegen
+        project = bakefilegen.project()
+        bakefilegen.add_module(project, self)
+        bakefilegen.run_bakefile(self.name, project)
+
+        
 
 
 def parse_sbf(filename):
@@ -43,8 +60,10 @@ def parse_sbf(filename):
         key, sep, value = line.partition(' = ')
         if value:
             assert not key in sbfdict
-            if key == 'sources':
-                value = value.split()
+            value = value.split()
+            if key == 'target':
+                assert len(value) == 1
+                value = value[0]
             sbfdict[key] = value
 
     assert all(k in sbfdict for k in ('target', 'sources', 'headers'))
@@ -63,14 +82,12 @@ def spawn_sip(sipfile, generated_src_dir):
 
     import sipconfig
     cfg = sipconfig.Configuration()
-    
     args = [
         cfg.sip_bin,
         '-c', generated_src_dir,  # generated sources go here
         '-b', sbf_filename,       # SBF output file describing the module's inputs
+        sipfile
     ]
-
-    args.append(sipfile)
 
     # spawn SIP, ensuring that a new SBF file is created
     mtime = os.path.getmtime(sbf_filename) if os.path.isfile(sbf_filename) else 0
@@ -78,35 +95,6 @@ def spawn_sip(sipfile, generated_src_dir):
     assert os.path.getmtime(sbf_filename) > mtime
 
     return parse_sbf(sbf_filename)
-
-
-def run(args, checkret = True, expect_return_code = 0):
-    '''
-    Runs cmd.
-
-    If the process returns 0, returns the contents of stdout.
-    Otherwise, raises an exception showing the error code and stderr.
-    '''
-
-    if os.name == 'nt':
-        if isinstance(args, basestring):
-            args = shlex.split(args.replace('\\', '\\\\'))
-
-    #inform('\n%s\n' % ' '.join(args))
-
-    try:
-        process = subprocess.Popen(args)
-    except WindowsError:
-        print >>sys.stderr, 'Error using Popen: args were %r' % args
-        raise
-
-    stdout, stderr = process.communicate()
-    retcode = process.returncode
-
-    if checkret and retcode != expect_return_code:
-        sys.exit(retcode)
-
-    return stdout
 
 def parse_args():
     from optparse import OptionParser
@@ -118,11 +106,8 @@ def parse_args():
                  help = 'directory generated sources will be placed in',
                  default = 'generated')
 
-    p.print_help()
-
     global opts
-    opts = p.parse_args()
+    return p.parse_args()
 
-if __name__ == '__main__':
-    parse_args()
+opts, args = parse_args()
 

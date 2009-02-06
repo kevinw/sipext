@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+
+<makefile>
+    <template id="python_extension">
+        <!-- create .PYDs instead of .DLLs on windows -->
+        <if cond="FORMAT in ('msvc', 'msvs2005prj', 'msvs2008prj')">
+            <set var="DLLEXT">.pyd</set>
+        </if>
+    </template>
+</makefile>
+
